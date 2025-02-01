@@ -23,7 +23,6 @@ Clarinet.test({
         
         block.receipts[0].result.expectOk().expectUint(1);
         
-        // Verify session details
         let getSession = chain.callReadOnlyFn(
             'bright_weave',
             'get-session',
@@ -38,71 +37,77 @@ Clarinet.test({
 });
 
 Clarinet.test({
-    name: "Can add collaborators and submit ideas",
+    name: "Can create milestones and enable milestone voting",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const collaborator = accounts.get('wallet_1')!;
         
-        // Create session
         let block = chain.mineBlock([
             Tx.contractCall('bright_weave', 'create-session', [
-                types.ascii("Test Session"),
+                types.ascii("Milestone Test"),
                 types.utf8("Test Description")
             ], deployer.address),
             
-            // Add collaborator
-            Tx.contractCall('bright_weave', 'add-collaborator', [
+            Tx.contractCall('bright_weave', 'create-milestone', [
                 types.uint(1),
-                types.principal(collaborator.address)
+                types.ascii("Q1 Release"),
+                types.utf8("First quarter release features")
+            ], deployer.address),
+            
+            Tx.contractCall('bright_weave', 'enable-milestone-voting', [
+                types.uint(1)
             ], deployer.address)
         ]);
         
         block.receipts.map(receipt => receipt.result.expectOk());
         
-        // Submit idea as collaborator
-        let ideaBlock = chain.mineBlock([
-            Tx.contractCall('bright_weave', 'submit-idea', [
-                types.uint(1),
-                types.utf8("New feature idea")
-            ], collaborator.address)
-        ]);
+        let getMilestone = chain.callReadOnlyFn(
+            'bright_weave',
+            'get-milestone',
+            [types.uint(1)],
+            deployer.address
+        );
         
-        ideaBlock.receipts[0].result.expectOk().expectUint(1);
+        let milestone = getMilestone.result.expectSome().expectTuple();
+        assertEquals(milestone['title'], types.ascii("Q1 Release"));
     }
 });
 
 Clarinet.test({
-    name: "Can vote on ideas",
+    name: "Can vote on ideas for milestones",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const collaborator = accounts.get('wallet_1')!;
         
-        // Setup session and idea
         let setup = chain.mineBlock([
             Tx.contractCall('bright_weave', 'create-session', [
-                types.ascii("Vote Test"),
+                types.ascii("Milestone Vote Test"),
                 types.utf8("Test Description")
             ], deployer.address),
+            
             Tx.contractCall('bright_weave', 'add-collaborator', [
                 types.uint(1),
                 types.principal(collaborator.address)
             ], deployer.address),
+            
             Tx.contractCall('bright_weave', 'submit-idea', [
                 types.uint(1),
-                types.utf8("Votable idea")
+                types.utf8("Milestone idea")
+            ], deployer.address),
+            
+            Tx.contractCall('bright_weave', 'enable-milestone-voting', [
+                types.uint(1)
             ], deployer.address)
         ]);
         
-        // Vote on idea
         let voteBlock = chain.mineBlock([
-            Tx.contractCall('bright_weave', 'vote-idea', [
+            Tx.contractCall('bright_weave', 'vote-idea-for-milestone', [
                 types.uint(1)
             ], collaborator.address)
         ]);
         
         voteBlock.receipts[0].result.expectOk().expectBool(true);
         
-        // Verify vote count
         let getIdea = chain.callReadOnlyFn(
             'bright_weave',
             'get-idea',
@@ -111,6 +116,6 @@ Clarinet.test({
         );
         
         let idea = getIdea.result.expectSome().expectTuple();
-        assertEquals(idea['votes'], types.uint(1));
+        assertEquals(idea['milestone-votes'], types.uint(1));
     }
 });
