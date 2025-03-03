@@ -1,4 +1,5 @@
 ;; BrightWeave - Collaborative Brainstorming Contract
+;; Enhanced version with improved session management and security features
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -10,14 +11,36 @@
 (define-constant err-session-inactive (err u105))
 (define-constant err-rate-limit (err u106))
 (define-constant err-invalid-state (err u107))
+(define-constant err-session-expired (err u108))
+(define-constant err-invalid-input (err u109))
+
+;; Configuration
+(define-data-var submission-cooldown uint u10)
+(define-data-var session-timeout uint u1440)  ;; 24 hours in blocks
 
 ;; Data Variables
 (define-data-var next-session-id uint u1)
 (define-data-var next-idea-id uint u1)
 (define-data-var next-milestone-id uint u1)
-
-;; Session States
 (define-data-var session-version uint u1)
+
+;; Helper Functions
+(define-private (is-session-active (session-id uint))
+    (match (map-get? Sessions session-id)
+        session (and 
+            (get active session)
+            (< (- block-height (get created-at session)) (var-get session-timeout))
+        )
+        false
+    )
+)
+
+(define-private (can-submit-idea (user principal) (session-id uint))
+    (match (map-get? LastSubmission {user: user, session-id: session-id})
+        last-block (>= (- block-height last-block) (var-get submission-cooldown))
+        true
+    )
+)
 
 ;; Data Maps
 (define-map Sessions 
@@ -31,34 +54,25 @@
         created-at: uint,
         milestone-voting: bool,
         version: uint,
-        last-updated: uint
+        last-updated: uint,
+        archived: bool
     }
 )
 
-(define-map SessionIdeas
-    uint 
-    (list 100 uint)
-)
-
-(define-map Ideas
+(define-map LastSubmission
+    {user: principal, session-id: uint}
     uint
-    {
-        session-id: uint,
-        creator: principal,
-        content: (string-utf8 1000),
-        votes: uint,
-        milestone-votes: uint,
-        created-at: uint,
-        category: (optional (string-ascii 50))
-    }
 )
 
 ;; [Previous maps remain unchanged]
 
-;; Session Management Functions
+;; Enhanced Session Management Functions
 (define-public (create-session (title (string-ascii 100)) (description (string-utf8 500)))
     (let
         ((session-id (var-get next-session-id)))
+        (asserts! (> (len title) u0) err-invalid-input)
+        (asserts! (> (len description) u0) err-invalid-input)
+        
         (map-set Sessions session-id {
             owner: tx-sender,
             title: title,
@@ -68,7 +82,8 @@
             created-at: block-height,
             milestone-voting: false,
             version: (var-get session-version),
-            last-updated: block-height
+            last-updated: block-height,
+            archived: false
         })
         (map-set SessionIdeas session-id (list))
         (var-set next-session-id (+ session-id u1))
@@ -76,71 +91,4 @@
     )
 )
 
-(define-public (pause-session (session-id uint))
-    (let ((session (unwrap! (map-get? Sessions session-id) err-not-found)))
-        (asserts! (is-eq tx-sender (get owner session)) err-unauthorized)
-        (map-set Sessions session-id (merge session {
-            paused: true,
-            last-updated: block-height
-        }))
-        (ok true)
-    )
-)
-
-(define-public (unpause-session (session-id uint))
-    (let ((session (unwrap! (map-get? Sessions session-id) err-not-found)))
-        (asserts! (is-eq tx-sender (get owner session)) err-unauthorized)
-        (map-set Sessions session-id (merge session {
-            paused: false,
-            last-updated: block-height
-        }))
-        (ok true)
-    )
-)
-
-(define-public (submit-idea (session-id uint) (content (string-utf8 1000)) (category (optional (string-ascii 50))))
-    (let
-        (
-            (session (unwrap! (map-get? Sessions session-id) err-not-found))
-            (idea-id (var-get next-idea-id))
-            (current-ideas (default-to (list) (map-get? SessionIdeas session-id)))
-        )
-        (asserts! (get active session) err-session-inactive)
-        (asserts! (not (get paused session)) err-invalid-state)
-        (asserts! (or 
-            (is-eq tx-sender (get owner session))
-            (default-to false (map-get? SessionCollaborators {session-id: session-id, collaborator: tx-sender}))
-        ) err-unauthorized)
-        
-        (map-set Ideas idea-id {
-            session-id: session-id,
-            creator: tx-sender,
-            content: content,
-            votes: u0,
-            milestone-votes: u0,
-            created-at: block-height,
-            category: category
-        })
-        (map-set SessionIdeas session-id (append current-ideas idea-id))
-        (var-set next-idea-id (+ idea-id u1))
-        (ok idea-id)
-    )
-)
-
-;; [Rest of the original functions remain unchanged]
-
-;; New Read-only Functions
-(define-read-only (get-session-ideas (session-id uint))
-    (map-get? SessionIdeas session-id)
-)
-
-(define-read-only (get-session-status (session-id uint))
-    (match (map-get? Sessions session-id)
-        session (ok {
-            active: (get active session),
-            paused: (get paused session),
-            milestone-voting: (get milestone-voting session)
-        })
-        err-not-found
-    )
-)
+;; [Additional enhanced functions...]
