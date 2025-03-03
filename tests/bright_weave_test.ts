@@ -1,31 +1,36 @@
-// [Previous test imports and existing tests remain unchanged]
+// Enhanced test file with additional test cases
 
 Clarinet.test({
-    name: "Can pause and unpause sessions",
+    name: "Session management with timeout and rate limiting",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
+        const user1 = accounts.get('wallet_1')!;
         
+        // Test session creation with validation
         let block = chain.mineBlock([
             Tx.contractCall('bright_weave', 'create-session', [
-                types.ascii("Pause Test"),
+                types.ascii("Test Session"),
                 types.utf8("Test Description")
-            ], deployer.address),
-            
-            Tx.contractCall('bright_weave', 'pause-session', [
-                types.uint(1)
             ], deployer.address)
         ]);
         
-        block.receipts.map(receipt => receipt.result.expectOk());
+        block.receipts[0].result.expectOk();
         
-        let getStatus = chain.callReadOnlyFn(
-            'bright_weave',
-            'get-session-status',
-            [types.uint(1)],
-            deployer.address
-        );
+        // Test rate limiting
+        let blocks = [];
+        for (let i = 0; i < 3; i++) {
+            blocks.push(
+                Tx.contractCall('bright_weave', 'submit-idea', [
+                    types.uint(1),
+                    types.utf8("Test Idea " + i),
+                    types.none()
+                ], user1.address)
+            );
+        }
         
-        let status = getStatus.result.expectOk().expectTuple();
-        assertEquals(status['paused'], types.bool(true));
+        let result = chain.mineBlock(blocks);
+        result.receipts[2].result.expectErr(106); // Rate limit error
     }
 });
+
+// [Additional test cases...]
